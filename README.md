@@ -1,2 +1,2 @@
 # GP
-Reference implementations of (my) control algorithms for Gaussian Process regression.
+Reference implementations of (my) algorithms for Gaussian Process regression.
