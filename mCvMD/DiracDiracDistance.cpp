@@ -6,7 +6,7 @@
 	I compiled it against OpenBLAS (https://github.com/xianyi/OpenBLAS). However, every other BLAS
 	library should work.
 	
-	Tested on i5-3320M, 8 GB RAM, Win10
+	Tested on i5-3320M, 8 GB RAM, Win10, Matlab 2015b x64
 	
 	Limitations: 
 		- only densities with equal numbers of components
