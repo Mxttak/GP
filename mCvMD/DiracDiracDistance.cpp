@@ -6,11 +6,11 @@
 	I compiled it against OpenBLAS (https://github.com/xianyi/OpenBLAS). However, every other BLAS
 	library should work.
 	
-	Tested on i5-3320M, 8 GB RAM, Win10, Matlab 2015b x64
+	Tested on i5-3320M, 8 GB RAM, Win10
 	
 	Limitations: 
 		- only densities with equal numbers of components
-		- no built in checks (for speed purposes)
+		- no built in checks (for speed purposes); this might crash your Matlab if you pass something wrong
 	
 	Structure of the input parameters: see Matlab script with the example
 	
@@ -21,40 +21,26 @@
 */
 
 #include <mex.h>
-#include "OpenBLAS-v0.2.12-Win64-int64/include/cblas.h"
-#define _USE_MATH_DEFINES
-#include <math.h>
-#include <memory.h>
-
-double Gamma = 0.5772156649015328606;
-
-inline double xlog(double x) {
-	if (x == 0) {
-		return 0;
-	}	
-	else {
-		return (x)*log(x);
-	}
-}
+#include "DiracDiracDistanceC.h"
 
 void mexFunction(int nlhs, mxArray* plhs[],			// output arguments
 				int nrhs, const mxArray* prhs[]) {	// input arguments
 
 	// get inputs
-		// density1
-		size_t dim1 = mxGetM(prhs[0]);
-		size_t numSamples1 = mxGetN(prhs[0]);
-		double* density1 = mxGetPr(prhs[0]);
+		// prhs[0]: density1
+		// prhs[1]: mean1
+		// prhs[2]: density2
+		// prhs[3]: mean2
+		// prhs[4]: bmax
 		
-		// mean1
+		mwSize numDims = mxGetNumberOfDimensions(prhs[2]);
+		mwSize* dim = (mwSize*)mxGetDimensions(prhs[2]);
+		double* density1 = mxGetPr(prhs[0]);
+
 		double* mean1 = mxGetPr(prhs[1]);
 
-		// density2
-		size_t dim2 = mxGetM(prhs[2]);
-		size_t numSamples2 = mxGetN(prhs[2]);
 		double* density2 = mxGetPr(prhs[2]);
-		
-		// mean2
+
 		double* mean2 = mxGetPr(prhs[3]);
 
 		double* bmax = mxGetPr(prhs[4]);
@@ -62,39 +48,7 @@ void mexFunction(int nlhs, mxArray* plhs[],			// output arguments
 	// allocate output
 		plhs[0] = mxCreateDoubleMatrix(1,1, mxREAL);
 		double* out = mxGetPr(plhs[0]);
-		
-		double Df = 0;
-		double Dfg = 0;
-		double Dg = 0;
-
-		double* tmp=(double*)malloc(dim1*sizeof(double));
-		double* tmpPtr;
-		
-		// compute Df, Dfg, Dg
-		for (size_t i = 0; i < numSamples1; i++) {
-			for (size_t j = 0; j < numSamples2; j++) {
-				tmpPtr = density1 + j*dim2;
-				memcpy(tmp,density1+i*dim1,dim1*sizeof(double));
-				cblas_daxpy(dim1, -1, tmpPtr, 1, tmp, 1);
-				Df = Df + xlog(cblas_ddot(dim1, tmp, 1, tmp, 1));
-
-				tmpPtr = density2 + j*dim2;
-				memcpy(tmp, density1 + i*dim1, dim1 * sizeof(double));
-				cblas_daxpy(dim1, -1, tmpPtr, 1, tmp, 1);
-				Dfg = Dfg + xlog(cblas_ddot(dim1, tmp, 1, tmp, 1));
-
-				tmpPtr = density2 + j*dim2;
-				memcpy(tmp, density2 + i*dim1, dim1 * sizeof(double));
-				cblas_daxpy(dim1, -1, tmpPtr, 1, tmp, 1);
 				
-				Dg = Dg + xlog(cblas_ddot(dim1, tmp, 1, tmp, 1));
-			}
-		}
-		
-		// compute parts of De
-		memcpy(tmp, mean1, dim1 * sizeof(double));
-		cblas_daxpy(dim1, -1, mean2, 1, tmp, 1);
-
-		*out = pow(M_PI, (double)dim1 / 2)*((Df - 2 * Dfg + Dg) / (numSamples1*numSamples2) + 2 * (log(4*(*bmax)*(*bmax))-Gamma)*cblas_ddot(dim1, tmp, 1, tmp, 1))/8;
+		*out = DiracDiracDistanceC(density1,dim[1],mean1,density2,dim[1],mean2,dim[0],bmax);
 	return;
 }
