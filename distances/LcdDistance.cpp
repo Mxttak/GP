@@ -30,7 +30,7 @@
     Warning: no builtin checks 
         
     Maxim Dolgov
-    Mai 10, 2016
+    May 12, 2016
     
     Provided as is. No warranty, no commercial usage.
 */
