@@ -78,7 +78,7 @@ void mexFunction(int nOnputs, mxArray* onputs[],			// output arguments
     else 
         nDensities1 = dimsDensity1[2];
         
-    mwSize nDensities2 = nDensities1, nSamples2 = nSamples1;
+    mwSize nDensities2 = nDensities1;
 
     // second density and mean
     mwSize *dimsDensity2, *dimsMeans2, numDimDensity2;
@@ -86,7 +86,7 @@ void mexFunction(int nOnputs, mxArray* onputs[],			// output arguments
     
     if(nInputs == 5){   
         densities2 = mxGetPr(inputs[3]);
-            mwSize numDimDensity2 = mxGetNumberOfDimensions(inputs[1]);
+            mwSize numDimDensity2 = mxGetNumberOfDimensions(inputs[3]);
             dimsDensity2 = (mwSize*) mxGetDimensions(inputs[3]);
         means2 = mxGetPr(inputs[4]);
                 
