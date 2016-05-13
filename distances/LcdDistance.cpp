@@ -3,18 +3,16 @@
     was published in U.D. Hanebeck, "Optimal Reduction of Multivariate Dirac Mixture 
     Densities", at-Automatisierungstechnik, 2015.
     
-    This implementation uses CBLAS from http://www.netlib.org/ 
+    This implementation uses Eigen available at https://eigen.tuxfamily.org
     
     Build (on Windows): 
-        mex LcdDistance.cpp libcblas.dll.a
+        mex LcdDistance.cpp -IEigen
     
         tested with Matlab R2015b on Win10 x64
         
-    Requirements:
-        You will need CBLAS that is available on http://www.netlib.org/ 
-        You can get info on how to build CBLAS for Windows at http://icl.cs.utk.edu/lapack-for-windows/lapack/
-        A prebuilt version of CBLAS for Win x64 is supplied with this implementation. However,
-        you will need MinGWx64 in your path.
+    Limitations:
+        No builtin checks.
+        Only densities with equal numbers of samples.
     
     Usage:
         [dist] = LcdDistance(bmax,dens1,mean1)
@@ -27,28 +25,23 @@
         - mean2: means of the densities in dens2 computed, e.g., as follows mean(dens2,2)
         - dist:  matrix with distances between the densities from dens1 or dens1 and dens2, respectively
         
-    Warning: no builtin checks 
-        
     Maxim Dolgov
-    May 12, 2016
+    May 13, 2016
     
     Provided as is. No warranty, no commercial usage.
 */
 
-#define _USE_MATH_DEFINES
-#include <math.h>
-#include <memory.h>
-#include "include/cblas.h"
 #include <mex.h>
+#include <cmath>
+#include <Eigen>
+
+/*------------------------------------------------------------------------------------------------------*/
 
 double Gamma = 0.5772156649015328606;
-double one = 1;
-double mone = -1;
-ptrdiff_t stepone = 1;
 
-/*-------------------------------------------------------------------------------------------*/
+/*------------------------------------------------------------------------------------------------------*/
 
-double DiracDiracDistanceC(double* density1, size_t numSamples1, double* mean1, double* density2, size_t numSamples2, double* mean2, size_t dim, double* bmax);
+double DiracDiracDistanceC(Eigen::Map<Eigen::MatrixXd> &densMat1, Eigen::Map<Eigen::VectorXd> &densMean1, Eigen::Map<Eigen::MatrixXd> &densMat2, Eigen::Map<Eigen::VectorXd> &densMean2, double *bmax);
 
 inline double xlog(double x) {
 	if (x == 0) {
@@ -58,31 +51,23 @@ inline double xlog(double x) {
 		return (x)*log(x);
 	}
 }
+    
+/*------------------------------------------------------------------------------------------------------*/
 
-/*-------------------------------------------------------------------------------------------*/
-
-/*            
-inputs: prhs[0]: bmax
-        prhs[1]: densities1 
-        prhs[2]: means1
-        prhs[3]: densities2
-        prhs[4]: means2        
-*/
-
-void mexFunction(int nlhs, mxArray* plhs[],			// output arguments
-				int nrhs, const mxArray* prhs[]) {	// input arguments
+void mexFunction(int nOnputs, mxArray* onputs[],			// output arguments
+				int nInputs, const mxArray* inputs[]) {	// input arguments
     
     // get inputs
     // bmax    
-    double* bmax = mxGetPr(prhs[0]);
+    double* bmax = mxGetPr(inputs[0]);
     
     // first density
-    double* densities1 = mxGetPr(prhs[1]);
-        mwSize numDimDensity1 = mxGetNumberOfDimensions(prhs[1]);
-        mwSize* dimsDensity1 = (mwSize*)mxGetDimensions(prhs[1]);
+    double* densities1 = mxGetPr(inputs[1]);
+        mwSize numDimDensity1 = mxGetNumberOfDimensions(inputs[1]);
+        mwSize* dimsDensity1 = (mwSize*)mxGetDimensions(inputs[1]);
     
     // first mean
-    double* means1 = mxGetPr(prhs[2]);
+    double* means1 = mxGetPr(inputs[2]);
     
     // assign dimensions
     mwSize m = dimsDensity1[0], nSamples1 = dimsDensity1[1];
@@ -99,14 +84,12 @@ void mexFunction(int nlhs, mxArray* plhs[],			// output arguments
     mwSize *dimsDensity2, *dimsMeans2, numDimDensity2;
     double *means2, *densities2;
     
-    if(nrhs == 5){   
-        densities2 = mxGetPr(prhs[3]);
-            mwSize numDimDensity2 = mxGetNumberOfDimensions(prhs[1]);
-            dimsDensity2 = (mwSize*) mxGetDimensions(prhs[3]);
-        means2 = mxGetPr(prhs[4]);//               dimsMeans2 = (mwSize*) mxGetDimensions(prhs[4]);
-        
-        nSamples2 = dimsDensity2[1];// nDensities2 = dimsMeans2[1];
-        
+    if(nInputs == 5){   
+        densities2 = mxGetPr(inputs[3]);
+            mwSize numDimDensity2 = mxGetNumberOfDimensions(inputs[1]);
+            dimsDensity2 = (mwSize*) mxGetDimensions(inputs[3]);
+        means2 = mxGetPr(inputs[4]);
+                
         if(numDimDensity2 == 2)
             nDensities2 = 1;
         else
@@ -114,82 +97,75 @@ void mexFunction(int nlhs, mxArray* plhs[],			// output arguments
     }
     
                
-    // create outputs 
-    plhs[0] = mxCreateDoubleMatrix(nDensities1,nDensities2, mxREAL);
-    double* out = mxGetPr(plhs[0]);
+    // create outputs
+    onputs[0] = mxCreateDoubleMatrix(nDensities1,nDensities2, mxREAL);
+    double* out = mxGetPr(onputs[0]);
     
-    // auxiliary variables
-    double* tmp = (double*) mxMalloc(m*sizeof(double));
-    
+    // auxiliary variables with dummy initialization (this is necessary, see Eigen docs)
+    Eigen::Map<Eigen::MatrixXd,Eigen::ColMajor> densMat1(densities1,m,nSamples1), densMat2(densities1,m,nSamples1);
+    Eigen::Map<Eigen::VectorXd> densMean1(means1,m), densMean2(means1,m);
+
+        
     // compute the distances
-    if(nrhs == 5){
+    if(nInputs == 5){
         // if two densities are provided
         for(mwSize i=0;i<nDensities1;i++){
-            for(mwSize j=0;j<nDensities2;j++){
+            for(mwSize j=0;j<nDensities2;j++){                
+                // map densities to matrices and means to vectors
+                new (&densMat1) Eigen::Map<Eigen::MatrixXd>(densities1+i*m*nSamples1,m,nSamples1);
+                new (&densMat2) Eigen::Map<Eigen::MatrixXd>(densities2+j*m*nSamples1,m,nSamples1);
+                new (&densMean1) Eigen::Map<Eigen::VectorXd>(means1+i*m,m);
+                new (&densMean2) Eigen::Map<Eigen::VectorXd>(means2+j*m,m);
                 
-                memcpy(tmp, means1+i*m, m * sizeof(double));
-                cblas_daxpy(m, -1, means2+j*m, 1, tmp, 1);                
-                    
-                out[i+j*nDensities1] = DiracDiracDistanceC(densities1+i*m*nSamples1, nSamples1, means1+i*m, densities2+j*m*nSamples2, nSamples2, means2+j*m, m,bmax);
+                // compute distance
+                out[i+j*nDensities1] = DiracDiracDistanceC(densMat1, densMean1, densMat2, densMean2, bmax);
             }
         }
     } else{
         // if one density is provided
         for(mwSize j=0;j<nDensities2;j++){
             for(mwSize i=j+1;i<nDensities1;i++){
-                
-                memcpy(tmp, means1+i*m, m * sizeof(double));
-                cblas_daxpy(m, -1, means1+j*m, 1, tmp, 1);
+                // map density to matrix and mean to vector
+                new (&densMat1) Eigen::Map<Eigen::MatrixXd>(densities1+i*m*nSamples1,m,nSamples1);
+                new (&densMat2) Eigen::Map<Eigen::MatrixXd>(densities1+j*m*nSamples1,m,nSamples1);
+                new (&densMean1) Eigen::Map<Eigen::VectorXd>(means1+i*m,m);
+                new (&densMean2) Eigen::Map<Eigen::VectorXd>(means1+j*m,m);
                     
-                out[j+i*nDensities1] = DiracDiracDistanceC(densities1+i*m*nSamples1, nSamples1, means1+i*m, densities1+j*m*nSamples1, nSamples1, means1+j*m, m,bmax);
+                // compute distance                    
+                out[j+i*nDensities1] = DiracDiracDistanceC(densMat1, densMean1, densMat2, densMean2, bmax);
                 out[i+j*nDensities1] = out[j+i*nDensities1];
             }
         }
     }
     
-    mxFree(tmp);
     return;
 }
 
-/*-------------------------------------------------------------------------------------------*/
+/*------------------------------------------------------------------------------------------------------*/
 
-double DiracDiracDistanceC(double* density1, size_t numSamples1, double* mean1, double* density2, size_t numSamples2, double* mean2, size_t dim, double* bmax){
-    double Df = 0;
-    double Dfg = 0;
-    double Dg = 0;
+double DiracDiracDistanceC(Eigen::Map<Eigen::MatrixXd,Eigen::ColMajor> &densMat1, Eigen::Map<Eigen::VectorXd> &densMean1, Eigen::Map<Eigen::MatrixXd,Eigen::ColMajor> &densMat2, Eigen::Map<Eigen::VectorXd> &densMean2, double *bmax){
+    double Df = 0, Dfg = 0, Dg = 0;
 
-    double* tmp=(double*)mxMalloc(dim*sizeof(double));
-    double* tmpPtr;
+    unsigned int numSamples1 = densMat1.cols();
+    unsigned int m = densMat1.rows();
     
-    double out;
-
-    // compute Df, Dfg, Dg
-    for (size_t i = 0; i < numSamples1; i++) {
-        for (size_t j = 0; j < numSamples2; j++) {
-            tmpPtr = density1 + j*dim;
-            memcpy(tmp,density1 + i*dim,dim*sizeof(double));
-            cblas_daxpy(dim, -1, tmpPtr, 1, tmp, 1);
-            Df = Df + xlog(cblas_ddot(dim, tmp, 1, tmp, 1));
+    Eigen::MatrixXd tmpMat(m,numSamples1);
+    Eigen::VectorXd tmpVecDf,tmpVecDfg,tmpVecDg;//(m);
+    
+    for(unsigned int i=0; i<numSamples1; i++){
+        for(unsigned int j=0; j<numSamples1; j++){
             
-            tmpPtr = density2 + j*dim;
-            memcpy(tmp, density1+i*dim, dim * sizeof(double));
-            cblas_daxpy(dim, -1, tmpPtr, 1, tmp, 1);            
-            Dfg = Dfg + xlog(cblas_ddot(dim, tmp, 1, tmp, 1));
+            tmpVecDf = densMat1.col(i)-densMat1.col(j);
+            tmpVecDfg = densMat1.col(i)-densMat2.col(j);
+            tmpVecDg = densMat2.col(i)-densMat2.col(j);
             
-            //tmpPtr = density2+j*dim;
-            memcpy(tmp, density2 + i*dim, dim * sizeof(double));
-            cblas_daxpy(dim, -1, tmpPtr, 1, tmp, 1);
-            Dg = Dg + xlog(cblas_ddot(dim, tmp, 1, tmp, 1));
-
+            Df = Df + xlog(tmpVecDf.squaredNorm());
+            Dfg = Dfg + xlog(tmpVecDfg.squaredNorm());
+            Dg = Dg + xlog(tmpVecDg.squaredNorm());
         }
     }
     
-    // compute parts of De
-    memcpy(tmp, mean1, dim * sizeof(double));
-    cblas_daxpy(dim, -1, mean2, 1, tmp, 1);
-
-    out =  pow(M_PI, (double)dim / 2)*((Df - 2 * Dfg + Dg) / (numSamples1*numSamples2) + 2 * (log(4*(*bmax)*(*bmax))-Gamma)*cblas_ddot(dim, tmp, 1, tmp, 1))/8;
+    tmpVecDf = densMean1 - densMean2;
     
-    mxFree(tmp);
-    return out;
+    return  pow(M_PI, (double)m / 2)*((Df - 2 * Dfg + Dg) / (numSamples1*numSamples1) + 2 * (log(4*(*bmax)*(*bmax))-Gamma)*tmpVecDf.squaredNorm())/8;    
 }
